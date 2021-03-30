@@ -1,0 +1,271 @@
+*******************************************************************
+***************Section 6 (31-43)**********************************
+
+*********************** 32 ***************************************
+- Geospatial field --> can run certain operations on
+
+- $geoWithin
+ -- Selects documents with geospatial data that exists entirely within a specified shape.
+ -- The specified shape can be either a GeoJSON Polygon (either single-ringed or multi-ringed), a GeoJSON MultiPolygon, or a shape defined by **legacy coordinate pairs**. 
+    The $geoWithin operator uses the $geometry operator to specify the GeoJSON object (for Polygon and MultiPolygon).
+ -- quey based on coordinate pairs on a plane - use with $centerSphere operator
+    {
+        <location field>: {
+            $geoWithin: { <shape operator>: <coordinates> }
+        }
+    }
+
+    {
+        <location field>: {
+            $geoWithin: { $centerSphere: [ [ <x>, <y> ], <radius> ] }
+   }
+}
+
+-- Get all the bootcamps within a radius based on zipcode location
+    -- bootcamps - controller and bootcamps - routes
+
+//  @route      GET /api/v1/bootcamps/radius/:zipcode/:distance(/:unit)
+// Get lat/lng from geocoder
+    const loc = await geocoder.geocode(zipcode);
+    const lat = loc[0].latitude;
+    const lng = loc[0].longitude;
+
+    const bootcamps = await Bootcamp. find({
+        location: { $geoWithin: { $centerSphere: [ [ lng, lat ], radius ] }}
+    });
+
+******************************************************************
+*************************34. Advanced Filtering ******************
+-- We can filter with direct field data
+-- or use mongodb comparison query operators for advanced filtering
+-- @route  GET /api/v1/bootcamps?averageCost[lte]=1000
+
+    let queryStr = JSON.stringify(req.query); // convert query JSON object - to string 
+
+    // if we find any of these (gt, lte..) and $ to it at the beginning
+    queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, match => `$${match}`);
+            --> queryStr = {"averageCost": {"$lte": "1000"}}
+
+    query = Bootcamp.find(JSON.parse(queryStr));
+    // find() - mongoose use $lt..etc operator to filter the result
+    *careers[in]=Mobile Development* find the matched in careers array (in mongodb)
+
+Name	Description
+$eq	    Matches values that are equal to a specified value.
+$gt	    Matches values that are greater than a specified value.
+$gte	Matches values that are greater than or equal to a specified value.
+$in	    Matches any of the values specified in an array.
+$lt	    Matches values that are less than a specified value.
+$lte	Matches values that are less than or equal to a specified value.
+$ne	    Matches all values that are not equal to a specified value.
+$nin	Matches none of the values specified in an array.
+
+
+**************************************************************************
+****************************** 35. Select $ Sorting ***********************
+-- routes: /api/v1/bootcamps?select=name,description
+
+-- Selecting the 'name' and 'description' fields -- mongoose
+        -- query.select('name description');
+        -- 1. There must be a query field to store which fields to be chosen
+                select=name,description
+                -- then exclude them from query string - before buiding query to database
+                // Copy req.query
+                const reqQuery = { ...req.query };
+
+                // Fields to exclude
+                const removeFields = ['select', 'sort'];
+
+                // Loop over removeFields and delete them from reqQuery
+                removeFields.forEach(param => delete reqQuery[param]);
+                --> Now there is no 'select' or 'sort' field in reqQuery
+        -- 2. Build query string
+                 // convert query JSON object - to string
+                let queryStr = JSON.stringify(reqQuery);  
+
+                // Create operators
+                queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, match => `$${match}`);
+        --3. Get resource from database
+         // Finding resource
+            query = Bootcamp.find(JSON.parse(queryStr));
+
+        --4. Filter resource
+         if(req.query.select - 'select in query string we passed to url') {
+            // ?select=name&description
+            
+            const fields = req.query.select.split(',').join(' ');
+            // --> fields = 'name description
+            
+            // Use mongoose select() function on selcted fields
+            query = query.select(fields);
+        }
+
+-- sort({ name: -1 }) -- or sort('-name'); negative - descending; positive - ascending
+ // Sort
+    if(req.query.sort) {
+        const sortBy = req.query.sort.split(',').join(' ');
+        query = query.sort(sortBy);
+    } else {
+        query = query.sort('-createdAt');// Default sort by created Date - descending
+    }
+
+*********************************************************
+****************** 36. Adding Pagination*****************
+?page=2&limit=2
+-- divide the results we get from database to 2 part and each part has 2 records.
+-- Add new query string: const removeFields = ['select', 'sort', 'page', 'limit'];
+ // Pagination
+    const page = parseInt(req.query.page, 10) || 1; // number of page from user input, default is 1.
+    const limit = parseInt(req.query.limit, 10) || 25; // number of records each page from user input, defautl is 25.
+    
+    const startIndex = (page - 1) * limit; // where to start from record list
+    const endIndex = page * limit;
+
+    query = query.skip(startIndex).limit(limit);
+    --> 1. skip(startIdex) = offset -- skip number of records - of the previous page:
+            example: page = 2 -> startIndex = 1 * limit -> skip 'limit' number of records.
+        2. limit(limit) -> display only 'limit' number of records.
+
+// Executing query
+    const bootcamps = await query;
+
+-- // Pagination result - show us where it goes now <prev   next>
+    const pagination = {};
+
+    if (endIndex < total) {
+        pagination.next = {
+            page: page + 1,
+            limit
+        }
+    }
+
+    if (startIndex > 0) {
+        pagination.prev = {
+            page: page - 1,
+            limit
+        }
+    }
+
+****************************************************************
+******************* Course Model & seeding *********************
+
+Create a reference to Bootcamp from Course Model
+const CourseSchema = new mongoose.Schema({
+    ....
+    ....
+     bootcamp: {
+        type: mongoose.Schema.ObjectId,--> ObjectId to the corresponding bootcamp.
+        ref: 'Bootcamp',
+        required: true
+    }
+});
+
+**********************************************************************
+************************* 38. Course Route & Controller **************
+-- Course Controller:
+    -- //  @route      GET /api/v1/courses
+    -- //  @route      GET /api/v1/courses/:bootcampId/courses
+    
+
+exports.getCourses = asyncHandler( async (req, res, next) => {
+    let query;
+
+    if (req.params.bootcampId) {
+        // if bootcampId is set - then find all courses for specific bootcamp
+        query = Course.find({ bootcamp: req.params.bootcampId });
+    } else {
+        // else find all courses
+        query = Course.find();
+    }
+
+    const courses = await query;
+
+});
+
+    const courses = require('./routes/courses');
+    app.use('/api/v1/courses', courses); // all {uRL} begin within */api/v1/courses*
+    //--> go to 'courses routes'
+
+-- Router: routes/courses:
+    const { 
+    getCourses
+} = require('../controllers/courses');
+
+**const router = express.Router({ mergeParams: true });** // receive params From
+// another route.
+
+router.route('/').get(getCourses); // /api/v1/courses/ -> process by getCourses controller
+
+
+-- How about GET /api/v1/courses/:bootcampId/courses?
+    -- 2 options: 
+        -- we can create another route and controller to handle this request
+        within *bootcamp*
+        -- We create controller in *courses* to handle this and re-route the
+        request from bootcamp to course router (better way for courses route to handle all related to course)
+
+    -- re-route from bootcamp router:   
+    const router = express.Router();
+
+    // Include other resource routers
+    const courseRouter = require('./courses');
+    
+    // Re-route into other resource routers
+    router.use('/:bootcampId/courses', courseRouter);
+
+    From courseRouter -- const router = express.Router(**{ mergeParams: true }**);
+
+**********************************************************************
+********************* Populate, Virtuals & Cascade delete*************
+-- query = Course.find().populate('bootcamp'); // populate the course with all data from corresponding bootcamp
+       // Populate with selected fields
+       Course.find().populate({
+            path: 'bootcamp',
+            select: 'name description'
+        });
+
+---> for courses: we can populate 'bootcamp' data for each course because there is reference to bootcamp
+    that the course belongs to.
+
+-- virtuals fields -  like mock fields - not in database
+mongoose virtuals documents:
+-- Virtuals are document properties that we can get and set but do not get persisted to MongoDB
+
+-- To populate related courses data within a bootcamp
+    -- enable option - virtuals fields in bootcamp Schema: .. 
+    {
+      toJSON: { virtuals: true },
+      toObject: { virtuals: true }
+    }
+
+    -- Reverse populate with virtuals
+    BootcampSchema.virtual('courses', // create virtual field named: courses 
+    {
+        ref: 'Course', // reference to the Course model
+        localField: '_id', // Primary Key id where 'bootcamp' field of Course point to.
+        foreignField: 'bootcamp', // foreign key that is in Course model 
+        justOne: false
+    });
+
+    
+    -- then populate courses within a bootcamp: 
+        query = Bootcamp.find(JSON.parse(queryStr)).populate('courses');
+
+-- Cascading delete:
+    // Cascade delete courses when a bootcamp is deleted
+    BootcampSchema.pre('remove', async function(next){
+        await this.model('Course').deleteMany({ bootcamp: this._id });
+        next();
+    });
+
+    -- this middleware is only triggered when:
+    bootcamp = await Bootcamp.findByIdAndDelete(req.params.id); 
+    bootcamp.remove() --> is called  
+
+
+
+
+
+
+
+
