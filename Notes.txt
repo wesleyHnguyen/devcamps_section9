@@ -260,7 +260,93 @@ mongoose virtuals documents:
 
     -- this middleware is only triggered when:
     bootcamp = await Bootcamp.findByIdAndDelete(req.params.id); 
-    bootcamp.remove() --> is called  
+    bootcamp.remove() --> is called 
+
+***************************************************************************
+***************************41. Update and Delete Course******************** 
+-- remove vs findIdAndDelete - delete?
+
+**************************************************************************
+*******************************42.Aggregate - Calculating average cost ****
+statics 
+    -- call directly from the model
+    -- don need to create an instance from the model
+    
+    CourseSchema.statics.getAverageCost = async function(bootcampId) {
+    const obj = await this.aggregate([
+        {
+            $match: { bootcamp: bootcampId }
+        },
+        {
+            $group: {
+                _id: '$bootcamp',                 //  the bootcamp's id for avarage calculating  - *matched* given 'bootcampId'
+                averageCost: { $avg: '$tuition' } // calculating the average '$avg' base on 'tuition' field and return the value to averageCost of 'obj'
+            }
+        }
+    ]);
+
+    // Actually putting averageCost field to corresponding bootcamp
+        try {
+            
+            await this.model('Bootcamp').findByIdAndUpdate(bootcampId, {
+                averageCost: Math.ceil(obj[0].averageCost / 10) * 10
+            });
+
+        } catch (error) {
+            console.log(error);
+        }
+
+    }
+
+    use:
+  // Call getAverageCost after save - calculate average cost after the course is saved to the database.
+    CourseSchema.post('save', function() {
+        this.constructor.getAverageCost(this.bootcamp); 
+    });
+
+    // Call getAverageCost before remove - re-calculate average cost before removing a course.
+    CourseSchema.pre('save', function() {
+        this.constructor.getAverageCost(this.bootcamp);
+    });
+
+********************************************************************************
+************************* 43. Photo Upload For Bootcamp ************************
+-- package: express-file-upload - upload file to the filesystem
+
+-- upload file from postman: -->Body --> form-format
+
+
+********************************************************************************
+************************ 44. Advanced Result Middleware ************************
+/middleware/advancedResults.js
+const advanceResults = (model, populate) => async (req, res, next) =>{
+    ...
+    query = model.find(JSON.parse(queryStr));
+    ...
+     if(populate) {
+        query = query.populate(populate);
+    }
+    ..
+
+    // add *advancedResults field* to the res object 
+    res.advancedResults = {
+        success: true,
+        count: results.length,
+        pagination,
+        data: results
+    }
+
+    next();
+
+}
+
+exports.getBootcamps = asyncHandler( async (req, res, next) => {   
+    res
+        .status(200)
+        .json(res.advancedResults); // res.advancedResults from the middleware 'advancedResults'
+});
+
+
 
 
 
