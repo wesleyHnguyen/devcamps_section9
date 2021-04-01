@@ -1,0 +1,117 @@
+**************************************************************************
+*************************** Authentication, User and Permission Part 2****
+
+****************************************************************************
+******************** 53. Bootcamp & User relationship *********************
+/model/Bootcamp.js:
+....
+....
+  user: {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User',
+        required: true
+      }
+
+/controller/bootcamp.js:
+// Check for published bootcamp
+    const publishedBootcamp = await Bootcamp.findOne({user: req.user.id});
+
+    // If the user is not an admin. They can only add one bootcamp
+    if(publishedBootcamp && req.user.role !== 'admin') {
+        return next(
+            new ErrorResponse(`The user with ID ${req.user.id} has already published a bootcamp`, 400)
+        );
+    }
+
+**********************************************************************
+*************** 54. Bootcamp ownership *******************************
+/model/User.js:
+user: {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User',
+        required: true
+    }
+
+/controller/bootcamp.js:
+
+// Make sure user is bootcamp owner  
+        if(bootcamp.user.toString() !== req.user.id && req.user.role !== 'admin'){
+            return next(new ErrorResponse(`User ${req.params.id} is not authorized to update this bootcamp`, 401));
+
+        }
+/controller/courses.js:
+
+// Make sure user is bootcamp owner  
+    if(bootcamp.user.toString() !== req.user.id && req.user.role !== 'admin'){
+        return next(
+            new ErrorResponse(
+                `User ${req.user.id} is not authorized to add a course to bootcamp ${bootcamp._id}`, 401));
+
+    }
+
+// Make sure user is course owner  
+    if(course.user.toString() !== req.user.id && req.user.role !== 'admin'){
+        return next(
+            new ErrorResponse(
+                `User ${req.user.id} is not authorized to update course ${course._id}`, 401));
+
+    }
+
+********************************************************************
+********************** 56. Forgot password - Generate Token*********  
+-- /model/User.js:
+
+        // Encrypt password using bcrypt
+        UserSchema.pre('save', async function(next) {
+            ** if(!this.isModified('password')) {
+                next();
+            }**
+
+            const salt = await bcrypt.genSalt(10);
+            this.password = await bcrypt.hash(this.password, salt);
+        });
+----------------
+        // Generate and hash password token
+        UserSchema.methods.getResetPasswordToken = function() {
+            // Generate tokens
+            const resetToken = crypto.randomBytes(20).toString('hex');
+
+            // Hash token and set to resetPasswordToken field 
+            this.resetPasswordToken = crypto
+                .createHash('sha256')
+                .update(resetToken)
+                .digest('hex');
+
+            // Set expire
+            this.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
+
+            return resetToken;
+        }
+
+-- /controller/user.js
+        // Get token from model, create cookie and send response
+        const sendTokentResponse = (user, statusCode, res) => {
+            const token = user.getSignedJwtToken();
+
+            const options = {
+                expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
+                httpOnly: true
+            };
+
+            if (process.env.NODE_ENV === 'production') {
+                options.secure = true;
+            }
+
+            res
+                .status(statusCode)
+                .cookie('token', token, options)
+                .json({ 
+                    success: true, 
+                    token
+                });
+        }
+
+******************************************************************
+***********************57. Forgot password and send email*********
+-- package: nodemailer
+-- using mailtrap: https://mailtrap.io
