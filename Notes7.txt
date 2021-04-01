@@ -1,0 +1,189 @@
+**********************************************************************************
+********* Section 7: Authentication, User & Permission - Part 1 ******************
+
+
+*********************************************************************************
+************************ 45. User Model *****************************************
+-- /model/User.js 
+  const UserSchema = new mongoose.Schema({
+  
+    email: {
+        type: String,
+        required: [true, 'Please add a email'],
+       ** unique: true, **
+        match: [
+          /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+          'Please add a valid email'
+        ]
+    },
+    role: {
+        type: String,
+        ** enum: ['user', 'publisher'],** 'admin' role should be manually added not by the app.
+        ** default **: 'user'
+    },
+  
+  })
+
+******************************************************************************
+**************************** 46. User Register & Encrypting Password *********
+exports.register = asyncHandler(async (req, res, next) => {
+    const { name, email, password, role} = req.body;
+
+    //  Create user    
+    const user = await User.create({
+        name,
+        email,
+        password,
+        role
+    });
+
+    res.status(200).json({ success: true});
+});
+
+then: /model/User.js
+
+// Encrypt password using bcrypt
+UserSchema.pre('save', async function(next) {
+    const salt = await bcrypt.genSalt(10);
+
+    this.password = await bcrypt.hash(this.password, salt);
+});
+
+*** Implement JWT ***
+***************************************************************************
+*************** 47. Sign & GET JSON Web Token *****************************
+package: jsonwebtoken
+
+-- use browser Local storage to store token has security issues --> user browser cookies
+    -- so we don't have to send it with every request manually
+
+/model/User.js:
+-- // Sign JWT and return
+    UserSchema.methods.getSignedJwtToken = function () { ** call from model instance **
+        return jwt.sign({ id: this._id }, process.env.JWT_SECRET, {
+            ** expiresIn: process.env.JWT_EXPIRE **
+        });
+    }
+
+    3 parts: {
+        "id": "606447558a556a67c1d7cf66",
+        "iat": 1617184597, initial at
+        "exp": 1619776597 - expiresIn
+    }
+/controller/user.js:
+// Create token
+    const token = user.getSignedJwtToken(); // 'user'   Not 'User'
+
+****************************************************************************
+******************* 48. User Login ****************************************
+/model/User.js:
+   -- // Match user entered password to hashed password in database
+    UserSchema.methods.matchPassword = async function(enteredPassword) {
+        return await bcrypt.compare(enteredPassword, this.password);
+    }
+
+/controller/user.js:
+exports.login = asyncHandler(async (req, res, next) => {
+
+    const user = await User.findOne({ email }).select('+password');
+
+
+    // Check if password matches
+    const isMatch = await user.matchPassword(password); // must use instance of user model - 'user'
+
+    if(!isMatch) {
+        return next(new ErrorResponse('Invalid credentials', 401));
+    }
+
+}
+
+********************************************************************
+*************** 49. Sending JWT in cookies *************************
+package: cookie-parser
+// Get token from model, create cookie and send response
+const sendTokentResponse = (user, statusCode, res) => {
+    const token = user.getSignedJwtToken();
+
+    const options = {
+        // Specify JWT token expires in 30 days
+        expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
+
+        httpOnly: true
+    };
+
+    if (process.env.NODE_ENV === 'production') {
+        options.secure = true;
+    }
+
+    res
+        .status(statusCode)
+        **.cookie('token', token, options)** // get from cookie-parser
+        .json({ 
+            success: true, 
+            token
+        });
+}
+
+*************************************************************************
+*********************** 50.Auth protect middleware ***********************
+-- Create a middleware -  can send along the token (receive when login/signup)
+    -- can access some protected route.
+    
+-- Take token stored in local storage all cookie on the client side
+    -- make a request - send along token in headers for authorization
+    -- Authorization    Bearer  token
+
+/middleware/auth.js:
+if (
+        req.headers.authorization && 
+        req.headers.authorization.startsWith('Bearer')
+        ) {
+            token = req.headers.authorization.split(' ')[1];
+
+}
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        **req.user = await User.findById(decoded.id);** // get id of the current user
+
+-- where to use: 
+    -- example in /route/bootcamps;
+    router
+    .route('/:id/photo')
+    .put(protect, bootcampPhotoUpload);
+    -- Get the current user: /controller.auth.js
+    exports.getMe = asyncHandler( async (req, res, next) => {
+    ** const user = await User.findById(req.user.id);**
+
+});
+
+********************************************************************************
+************************ 51. Storing the Token in Postman*************************
+-- Postman /auth/login: --> Tests 
+pm.environment.set("TOKEN", pm.response.json().token)
+-- then choose Authorization tab -> Bearer token -> put {{TOKEN}} in the input 'token' box -> SAVE
+
+*********************************************************************
+********************* 52. Role Authorization ************************
+// Grant access to the specific role  
+exports.authorize = (...roles) => {
+    return (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return next(new ErrorResponse(`User role ${req.user.role} is not unauthorized to access this route`, 403))
+        }
+        next();
+    }
+}
+
+--> spreading operator ...roles - so all the arguments passed in to the function will be put
+    into the array 'roles'
+    - now if the current user role (from token) is not in one of the roles -> return error and next()
+
+usage: 
+router
+  .route('/:id/photo')
+  .put(protect, authorize('publisher', 'admin') ,bootcampPhotoUpload); // two roles to access this route.
+
+-- Need ownership to access resources.
+
+
