@@ -113,5 +113,92 @@ user: {
 
 ******************************************************************
 ***********************57. Forgot password and send email*********
--- package: nodemailer
--- using mailtrap: https://mailtrap.io
+-- package: nodemailer:
+-- /utils/sendEmail.js:
+
+-- using mailtrap: https://mailtrap.io -- mail provider
+
+******************************************************************
+************************* 58. Reset Password ************************
+-- When resetting password succeed, resetPassword and resetPasswordExpire - will be remove - from database
+-- /controller/auth.js:
+    exports.resetPassword = asyncHandler( async (req, res, next) => {
+
+        // Receive reset token from the email
+        // hash it to compare with the resetPasswordToken from database
+        const resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(req.params.resettoken)
+            .digest('hex');
+
+
+        // Find a user from database that match two conditions:
+        // 1. 
+        const user = await User.findOne({
+        *resetPasswordToken* -- from above - find the one with this resetPasswordToken, 
+        resetPasswordExpire: {$gt: Date.now()}} - with the resetPasswordExpire = past + 10 min > now());
+
+        // Then store the new password 
+        user.password = req.body.password;
+        // set all the temporary fields to undefined so they cannot be stored to database
+        user.resetPasswordToken = undefined
+        user.resetPasswordExpire = undefined
+
+        // save the user to database
+        await user.save();
+
+        sendTokentResponse(user, 200, res);
+        
+    });
+
+-- /routes/auth.js:
+router.put('/resetpassword/:resettoken', resetPassword);
+
+*****************************************************************************
+************************ 59. Update User Details ****************************
+-- /controller/auth.js:
+exports.updatePassword = asyncHandler( async (req, res, next) => {
+
+    // Get a user from database by the user id
+    // remember to return the user password because
+    // we set it by default is password : {select: false }
+    // which tell mongoose that to exclude it from the result
+    // so we use select('+password') to include it to the query result
+    const user = await User.findById(req.user.id).select('+password');
+
+            -- user:{
+                        role: 'publisher',
+                        _id: 5d7a514b5d2c12c7449be045,
+                        name: 'John Doe',
+                        email: 'john@gmail.com',
+                        password: '$2a$10$dsfJoLt.R0HPrcKSqGHYD.Ud3t4WTSJ0sXdDw2FFHNqK.AbXAZwMy',
+                        createdAt: 2021-04-01T08:31:51.158Z,
+                        __v: 0
+                    }
+
+
+
+    // Check current password
+    if(!(await user.matchPassword(req.body.currentPassword))) {
+        return next(new ErrorResponse('Password is incorrect', 401));
+
+    }
+
+    user.password = req.body.newPassword; // Set password to the new password
+
+    await user.save(); // save updated user to the database
+
+    sendTokentResponse(user, 200, res);
+
+});
+
+**********************************************************************
+*********************** 60. Admin User CRUD **************************
+-- /controller/users.js.
+-- /routes/users.js.
+-- server.js.
+        -- const users = require('./routes/users');
+        -- app.use('/api/v1/users', users);
+
+
+ 
